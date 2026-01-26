@@ -358,18 +358,20 @@ public final class EventDispatch: @unchecked Sendable,
 		line: UInt = #line,
 		function: StaticString = #function
 	) {
-		TaskQueue.default.sync {
+		_ = TaskQueue.default.sync { _ in
 			guard `default`.globalSink == nil else {
 				return
 			}
 			`default`.globalSink = sink
 			// Emit event after setting to avoid recursion
-			TaskQueue.default.async {
+			TaskQueue.default.async { taskInfo in
 				let info = EventInfo(
 					file: String(describing: file),
 					line: line,
 					function: String(describing: function),
-					extra: nil
+					extra: [
+						TaskQueue.TaskInfo.Key.taskId: .uint64(taskInfo.taskId)
+					]
 				)
 				`default`.emitDispatchEvent(.globalSinkSet(info: info))
 			}
@@ -395,7 +397,7 @@ public final class EventDispatch: @unchecked Sendable,
 	) -> Bool {
 		let timestamp = MonotonicNanostamp.now
 
-		return TaskQueue.default.sync {
+		let result = TaskQueue.default.sync { _ in
 			let typeID = ObjectIdentifier(E.self)
 
 			guard sinks[typeID] == nil else {
@@ -406,12 +408,15 @@ public final class EventDispatch: @unchecked Sendable,
 
 			// Emit event after registration
 			let eventTypeName = String(describing: eventType)
-			TaskQueue.default.async {
+			TaskQueue.default.async { taskInfo in
 				let info = EventInfo(
 					timestamp: timestamp,
 					file: String(describing: file),
 					line: line,
 					function: String(describing: function),
+					extra: [
+						TaskQueue.TaskInfo.Key.taskId: .uint64(taskInfo.taskId)
+					]
 				)
 				self.emitDispatchEvent(.sinkRegistered(
 					eventType: eventTypeName,
@@ -421,6 +426,8 @@ public final class EventDispatch: @unchecked Sendable,
 
 			return true
 		}
+
+		return result.value
 	}
 
 	/// Unregisters the sink for a specific event type.
@@ -439,7 +446,7 @@ public final class EventDispatch: @unchecked Sendable,
 	) -> Bool {
 		let timestamp = MonotonicNanostamp.now
 
-		return TaskQueue.default.sync {
+		let result = TaskQueue.default.sync { _ in
 			let typeID = ObjectIdentifier(E.self)
 			guard sinks.removeValue(forKey: typeID) != nil else {
 				return false
@@ -447,12 +454,15 @@ public final class EventDispatch: @unchecked Sendable,
 
 			// Emit event after unregistration
 			let eventTypeName = String(describing: eventType)
-			TaskQueue.default.async {
+			TaskQueue.default.async { taskInfo in
 				let info = EventInfo(
 					timestamp: timestamp,
 					file: String(describing: file),
 					line: line,
-					function: String(describing: function)
+					function: String(describing: function),
+					extra: [
+						TaskQueue.TaskInfo.Key.taskId: .uint64(taskInfo.taskId)
+					]
 				)
 				self.emitDispatchEvent(.sinkUnregistered(
 					eventType: eventTypeName,
@@ -462,6 +472,8 @@ public final class EventDispatch: @unchecked Sendable,
 
 			return true
 		}
+
+		return result.value
 	}
 
 	/// Sinks an event asynchronously.
@@ -474,16 +486,18 @@ public final class EventDispatch: @unchecked Sendable,
 		function: StaticString = #function
 	) {
 		let timestamp = MonotonicNanostamp.now
-
-		TaskQueue.default.async {
+		TaskQueue.default.async { taskInfo in
 			let typeID = ObjectIdentifier(E.self)
+
+			var coorelatedExtra = extra ?? .init()
+			coorelatedExtra[TaskQueue.TaskInfo.Key.taskId] = .uint64(taskInfo.taskId)
 
 			let info = EventInfo(
 				timestamp: timestamp,
 				file: String(describing: file),
 				line: line,
 				function: String(describing: function),
-				extra: extra
+				extra: coorelatedExtra
 			)
 
 			if let sink = self.sinks[typeID] {
