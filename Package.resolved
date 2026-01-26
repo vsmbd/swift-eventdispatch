@@ -1,0 +1,15 @@
+{
+  "originHash" : "5d92abe455ee8c38338fb30da2427b3035ed2674508fb0b7a6ff29aeb59e7992",
+  "pins" : [
+    {
+      "identity" : "swift-core",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/vsmbd/swift-core.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "6b0653fb6622290802c318b682d846d0317f605a"
+      }
+    }
+  ],
+  "version" : 3
+}
