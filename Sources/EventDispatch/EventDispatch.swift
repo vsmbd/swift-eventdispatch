@@ -486,27 +486,22 @@ public final class EventDispatch: @unchecked Sendable,
 				extra: extra
 			)
 
-			// Send to global sink first (for tracing, spanning, logging, etc.)
-			if let globalSink = self.globalSink {
-				globalSink.sink(
-					event: event,
-					info: info
-				)
-			}
-
-			// Then send to registered sink for this event type
 			if let sink = self.sinks[typeID] {
-				sink.sink(
-					event: event,
-					info: info
-				)
 				// Emit dispatched event with complete event and info
+				// The global sink receives this EventDispatchEvent which contains the original event
 				self.emitDispatchEvent(.dispatched(
 					event: AnyEvent(event),
 					info: info
 				))
+
+				// Send to registered sink for this event type
+				sink.sink(
+					event: event,
+					info: info
+				)
 			} else {
 				// Emit dropped event with complete event and info
+				// The global sink receives this EventDispatchEvent which contains the original event
 				self.emitDispatchEvent(.dropped(
 					event: AnyEvent(event),
 					info: info
