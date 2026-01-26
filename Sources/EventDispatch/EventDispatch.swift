@@ -224,8 +224,6 @@ extension AnyEvent: Codable {
 			eventTypeName,
 			forKey: .eventTypeName
 		)
-		// Note: The actual event is not encoded, only the type name
-		// The event remains accessible at runtime through the `event` property
 	}
 }
 
