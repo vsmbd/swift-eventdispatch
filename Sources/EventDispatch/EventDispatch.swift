@@ -489,20 +489,19 @@ public final class EventDispatch: @unchecked Sendable,
 		TaskQueue.default.async { taskInfo in
 			let typeID = ObjectIdentifier(E.self)
 
-			var coorelatedExtra = extra ?? .init()
-			coorelatedExtra[TaskQueue.TaskInfo.Key.taskId] = .uint64(taskInfo.taskId)
+			var correlatedExtra = extra ?? [:]
+			correlatedExtra[TaskQueue.TaskInfo.Key.taskId] = .uint64(taskInfo.taskId)
 
 			let info = EventInfo(
 				timestamp: timestamp,
 				file: String(describing: file),
 				line: line,
 				function: String(describing: function),
-				extra: coorelatedExtra
+				extra: correlatedExtra
 			)
 
 			if let sink = self.sinks[typeID] {
-				// Emit dispatched event with complete event and info
-				// The global sink receives this EventDispatchEvent which contains the original event
+				// Emit dispatched event
 				self.emitDispatchEvent(.dispatched(
 					event: AnyEvent(event),
 					info: info
@@ -514,8 +513,7 @@ public final class EventDispatch: @unchecked Sendable,
 					info: info
 				)
 			} else {
-				// Emit dropped event with complete event and info
-				// The global sink receives this EventDispatchEvent which contains the original event
+				// Emit dropped event
 				self.emitDispatchEvent(.dropped(
 					event: AnyEvent(event),
 					info: info
