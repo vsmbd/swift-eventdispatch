@@ -64,6 +64,17 @@ public enum EventExtraValue: Equatable,
 	case double(Double)
 	case float(Float)
 
+	private enum CodingKeys: String,
+							 CodingKey,
+							 CaseIterable {
+		case string
+		case bool
+		case int64
+		case uint64
+		case double
+		case float
+	}
+
 	public init(from decoder: Decoder) throws {
 		let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -96,17 +107,35 @@ public enum EventExtraValue: Equatable,
 		// Decode based on the found key
 		switch key {
 		case .string:
-			self = .string(try container.decode(String.self, forKey: .string))
+			self = .string(try container.decode(
+				String.self,
+				forKey: .string
+			))
 		case .bool:
-			self = .bool(try container.decode(Bool.self, forKey: .bool))
+			self = .bool(try container.decode(
+				Bool.self,
+				forKey: .bool
+			))
 		case .int64:
-			self = .int64(try container.decode(Int64.self, forKey: .int64))
+			self = .int64(try container.decode(
+				Int64.self,
+				forKey: .int64
+			))
 		case .uint64:
-			self = .uint64(try container.decode(UInt64.self, forKey: .uint64))
+			self = .uint64(try container.decode(
+				UInt64.self,
+				forKey: .uint64
+			))
 		case .double:
-			self = .double(try container.decode(Double.self, forKey: .double))
+			self = .double(try container.decode(
+				Double.self,
+				forKey: .double
+			))
 		case .float:
-			self = .float(try container.decode(Float.self, forKey: .float))
+			self = .float(try container.decode(
+				Float.self,
+				forKey: .float
+			))
 		}
 	}
 
@@ -115,27 +144,36 @@ public enum EventExtraValue: Equatable,
 
 		switch self {
 		case let .string(value):
-			try container.encode(value, forKey: .string)
+			try container.encode(
+				value,
+				forKey: .string
+			)
 		case let .bool(value):
-			try container.encode(value, forKey: .bool)
+			try container.encode(
+				value,
+				forKey: .bool
+			)
 		case let .int64(value):
-			try container.encode(value, forKey: .int64)
+			try container.encode(
+				value,
+				forKey: .int64
+			)
 		case let .uint64(value):
-			try container.encode(value, forKey: .uint64)
+			try container.encode(
+				value,
+				forKey: .uint64
+			)
 		case let .double(value):
-			try container.encode(value, forKey: .double)
+			try container.encode(
+				value,
+				forKey: .double
+			)
 		case let .float(value):
-			try container.encode(value, forKey: .float)
+			try container.encode(
+				value,
+				forKey: .float
+			)
 		}
-	}
-
-	private enum CodingKeys: String, CodingKey, CaseIterable {
-		case string
-		case bool
-		case int64
-		case uint64
-		case double
-		case float
 	}
 }
 
@@ -145,8 +183,8 @@ public enum EventExtraValue: Equatable,
 /// The original event is preserved for runtime access.
 /// Note: The event itself is not encoded/decoded, only the type name is preserved for Codable.
 public struct AnyEvent: Event {
-	let event: any Event
-	let eventTypeName: String
+	public let event: any Event
+	public let eventTypeName: String
 
 	init<E: Event>(_ event: E) {
 		self.event = event
@@ -156,22 +194,36 @@ public struct AnyEvent: Event {
 
 extension AnyEvent: Codable {
 	enum CodingKeys: String, CodingKey {
+		case event
 		case eventTypeName
 	}
 
 	public init(from decoder: Decoder) throws {
 		let container = try decoder.container(keyedBy: CodingKeys.self)
-		eventTypeName = try container.decode(String.self, forKey: .eventTypeName)
+		eventTypeName = try container.decode(
+			String.self,
+			forKey: .eventTypeName
+		)
+
 		// We can't decode the actual event without knowing its type
 		// Create a placeholder - the event won't be accessible after decoding
 		// This is acceptable since EventDispatchEvent is primarily for runtime tracing
-		struct PlaceholderEvent: Event {}
+		struct PlaceholderEvent: Event {
+			//
+		}
 		event = PlaceholderEvent()
 	}
 
 	public func encode(to encoder: Encoder) throws {
 		var container = encoder.container(keyedBy: CodingKeys.self)
-		try container.encode(eventTypeName, forKey: .eventTypeName)
+		try container.encode(
+			event,
+			forKey: .event
+		)
+		try container.encode(
+			eventTypeName,
+			forKey: .eventTypeName
+		)
 		// Note: The actual event is not encoded, only the type name
 		// The event remains accessible at runtime through the `event` property
 	}
