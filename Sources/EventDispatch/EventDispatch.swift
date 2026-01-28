@@ -29,7 +29,7 @@ public struct EventInfo: Sendable,
 	public let file: String
 	public let line: UInt
 	public let function: String
-	public let extra: [String: EventExtraValue]?
+	public let extra: [String: ScalarValue]?
 
 	@inlinable
 	public init(
@@ -37,7 +37,7 @@ public struct EventInfo: Sendable,
 		file: String,
 		line: UInt,
 		function: String,
-		extra: [String: EventExtraValue]? = nil
+		extra: [String: ScalarValue]? = nil
 	) {
 		self.eventId = nextEventID()
 		self.timestamp = timestamp
@@ -48,134 +48,6 @@ public struct EventInfo: Sendable,
 	}
 }
 
-// MARK: - EventExtraValue
-
-/// Scalar value type for event metadata extras.
-/// Limited to scalar types to preserve Codable and Sendable compliance.
-@frozen
-public enum EventExtraValue: Equatable,
-							 Codable,
-							 Sendable,
-							 Hashable {
-	case string(String)
-	case bool(Bool)
-	case int64(Int64)
-	case uint64(UInt64)
-	case double(Double)
-	case float(Float)
-
-	private enum CodingKeys: String,
-							 CodingKey,
-							 CaseIterable {
-		case string
-		case bool
-		case int64
-		case uint64
-		case double
-		case float
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: CodingKeys.self)
-
-		// Validate that exactly one key is present
-		var foundKey: CodingKeys?
-		for key in CodingKeys.allCases {
-			if container.contains(key) {
-				if foundKey != nil {
-					throw DecodingError.dataCorrupted(
-						DecodingError.Context(
-							codingPath: decoder.codingPath,
-							debugDescription: "EventExtraValue must contain exactly one scalar type key"
-						)
-					)
-				}
-				foundKey = key
-			}
-		}
-
-		guard let key = foundKey else {
-			throw DecodingError.keyNotFound(
-				CodingKeys.string,
-				DecodingError.Context(
-					codingPath: decoder.codingPath,
-					debugDescription: "EventExtraValue must contain exactly one scalar type key"
-				)
-			)
-		}
-
-		// Decode based on the found key
-		switch key {
-		case .string:
-			self = .string(try container.decode(
-				String.self,
-				forKey: .string
-			))
-		case .bool:
-			self = .bool(try container.decode(
-				Bool.self,
-				forKey: .bool
-			))
-		case .int64:
-			self = .int64(try container.decode(
-				Int64.self,
-				forKey: .int64
-			))
-		case .uint64:
-			self = .uint64(try container.decode(
-				UInt64.self,
-				forKey: .uint64
-			))
-		case .double:
-			self = .double(try container.decode(
-				Double.self,
-				forKey: .double
-			))
-		case .float:
-			self = .float(try container.decode(
-				Float.self,
-				forKey: .float
-			))
-		}
-	}
-
-	public func encode(to encoder: Encoder) throws {
-		var container = encoder.container(keyedBy: CodingKeys.self)
-
-		switch self {
-		case let .string(value):
-			try container.encode(
-				value,
-				forKey: .string
-			)
-		case let .bool(value):
-			try container.encode(
-				value,
-				forKey: .bool
-			)
-		case let .int64(value):
-			try container.encode(
-				value,
-				forKey: .int64
-			)
-		case let .uint64(value):
-			try container.encode(
-				value,
-				forKey: .uint64
-			)
-		case let .double(value):
-			try container.encode(
-				value,
-				forKey: .double
-			)
-		case let .float(value):
-			try container.encode(
-				value,
-				forKey: .float
-			)
-		}
-	}
-}
 
 // MARK: - AnyEvent
 
@@ -277,7 +149,7 @@ public protocol EventDispatcher: Sendable {
 	///   - function: Call site function name (defaults to #function)
 	func sink<E: Event>(
 		event: E,
-		extra: [String: EventExtraValue]?,
+		extra: [String: ScalarValue]?,
 		file: StaticString,
 		line: UInt,
 		function: StaticString
@@ -480,7 +352,7 @@ public final class EventDispatch: @unchecked Sendable,
 	/// If no sink is registered for the event type, the event is dropped silently.
 	public func sink<E: Event>(
 		event: E,
-		extra: [String: EventExtraValue]? = nil,
+		extra: [String: ScalarValue]? = nil,
 		file: StaticString = #fileID,
 		line: UInt = #line,
 		function: StaticString = #function
