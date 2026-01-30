@@ -135,6 +135,25 @@ public enum EventDispatchEvent: Event {
 	case globalSinkSet(
 		info: EventInfo
 	)
+
+	public var kind: String {
+		switch self {
+		case .dispatched:
+			typeName + "_dispatched"
+
+		case .dropped:
+			typeName + "_dropped"
+
+		case .sinkRegistered:
+			typeName + "_sinkRegistered"
+
+		case .sinkUnregistered:
+			typeName + "_sinkUnregistered"
+
+		case .globalSinkSet:
+			typeName + "_globalSinkSet"
+		}
+	}
 }
 
 // MARK: - EventDispatcher
