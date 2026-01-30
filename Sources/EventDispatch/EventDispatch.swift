@@ -14,13 +14,19 @@ import EventDispatchNativeCounters
 /// Events are strongly-typed, domain payload values. They are routed by type; at most one sink per event type is registered. Events must be `Encodable` and `Sendable` for safe serialization and cross-thread use.
 public protocol Event: Encodable,
 					   Sendable {
-	//
+	var kind: String { get }
+}
+
+extension Event {
+	public var kind: String {
+		String(describing: type(of: self))
+	}
 }
 
 // MARK: - EventInfo
 
 /// Metadata record attached to every sunk event. Carries identity (eventId), time (timestamp), call-site and entity context (checkpoint), optional task context (taskInfo), and scalar extras.
-/// When `taskInfo` is present, `taskId` is merged into `extra` under `TaskQueue.TaskInfo.Key.taskId` for correlation. Call-site details (file, line, function) are on `checkpoint`.
+/// Call-site details (file, line, function) are on `checkpoint`.
 @frozen
 public struct EventInfo: Sendable,
 						 Hashable,
