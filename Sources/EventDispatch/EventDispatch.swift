@@ -11,51 +11,60 @@ import EventDispatchNativeCounters
 // MARK: - Event
 
 /// Protocol that all events must conform to.
-/// Events are strongly-typed values that carry domain payload.
-public protocol Event: Codable,
+/// Events are strongly-typed, domain payload values. They are routed by type; at most one sink per event type is registered. Events must be `Encodable` and `Sendable` for safe serialization and cross-thread use.
+public protocol Event: Encodable,
 					   Sendable {
 	//
 }
 
 // MARK: - EventInfo
 
-/// Metadata record attached to every sunk event.
+/// Metadata record attached to every sunk event. Carries identity (eventId), time (timestamp), call-site and entity context (checkpoint), optional task context (taskInfo), and scalar extras.
+/// When `taskInfo` is present, `taskId` is merged into `extra` under `TaskQueue.TaskInfo.Key.taskId` for correlation. Call-site details (file, line, function) are on `checkpoint`.
 @frozen
 public struct EventInfo: Sendable,
 						 Hashable,
-						 Codable {
+						 Encodable {
+	/// Globally unique event id (process-wide, from native counter).
 	public let eventId: UInt64
+	/// Monotonic timestamp captured when the event was sunk (before async enqueue).
 	public let timestamp: MonotonicNanostamp
-	public let file: String
-	public let line: UInt
-	public let function: String
+	/// Checkpoint (entity + file/line/function) for this event. Use for call-site and entity correlation.
+	public let checkpoint: Checkpoint
+	/// Task info when the event was sunk from a TaskQueue task; `nil` otherwise. When non-nil, `taskId` is also in `extra`.
+	public let taskInfo: TaskQueue.TaskInfo?
+	/// Optional scalar metadata. When `taskInfo` is present, includes `TaskQueue.TaskInfo.Key.taskId`.
 	public let extra: [String: ScalarValue]?
 
+	/// Creates event metadata. When `taskInfo` is non-nil, merges `taskId` into `extra` (creating or updating the dictionary).
+	/// - Parameters:
+	///   - timestamp: Monotonic time for the event; defaults to `.now`.
+	///   - checkpoint: Checkpoint (entity + file/line/function) for this event.
+	///   - taskInfo: Optional task context; when present, `taskId` is added to `extra`.
+	///   - extra: Optional scalar metadata; merged with `taskId` when `taskInfo` is non-nil.
 	@inlinable
 	public init(
 		timestamp: MonotonicNanostamp = .now,
-		file: String,
-		line: UInt,
-		function: String,
+		checkpoint: Checkpoint,
+		taskInfo: TaskQueue.TaskInfo? = nil,
 		extra: [String: ScalarValue]? = nil
 	) {
 		self.eventId = nextEventID()
 		self.timestamp = timestamp
-		self.file = file
-		self.line = line
-		self.function = function
+		self.checkpoint = checkpoint
+		self.taskInfo = taskInfo
 		self.extra = extra
 	}
 }
 
-
 // MARK: - AnyEvent
 
-/// Type-erased wrapper for events to enable storage in EventDispatchEvent.
-/// The original event is preserved for runtime access.
-/// Note: The event itself is not encoded/decoded, only the type name is preserved for Codable.
+/// Type-erased wrapper for events so they can be stored and passed as a single type (e.g. in `EventDispatchEvent`).
+/// The original event is available at runtime via `event`; `eventTypeName` identifies the type. When decoding, the payload is replaced by a placeholder—only `eventTypeName` is preserved.
 public struct AnyEvent: Event {
+	/// The type-erased event instance. After decoding, this is a placeholder if the event was encoded.
 	public let event: any Event
+	/// The name of the event type (e.g. `String(describing: E.self)`).
 	public let eventTypeName: String
 
 	init<E: Event>(_ event: E) {
@@ -101,23 +110,22 @@ extension AnyEvent: Codable {
 
 // MARK: - EventDispatchEvent
 
-/// Internal events emitted by EventDispatch for tracing and observability.
-/// These events are only sent to the global sink, never to registered sinks.
+/// Internal events emitted by EventDispatch for tracing and observability. Sent only to the global sink (if set), never to type-specific registered sinks. Use to observe dispatch, drops, and registration lifecycle.
 @frozen
 public enum EventDispatchEvent: Event {
-	/// An event was successfully dispatched to a registered sink.
+	/// A domain event was successfully dispatched to a registered sink for its type.
 	case dispatched(
 		event: AnyEvent,
 		info: EventInfo
 	)
 
-	/// An event was dropped because no sink was registered for its type.
+	/// A domain event was dropped because no sink was registered for its type.
 	case dropped(
 		event: AnyEvent,
 		info: EventInfo
 	)
 
-	/// A sink was registered for an event type.
+	/// A sink was registered for an event type. `eventType` is the type name (e.g. `String(describing: E.self)`).
 	case sinkRegistered(
 		eventType: String,
 		info: EventInfo
@@ -129,7 +137,7 @@ public enum EventDispatchEvent: Event {
 		info: EventInfo
 	)
 
-	/// The global sink was set.
+	/// The global sink was set. Emitted asynchronously after the set call.
 	case globalSinkSet(
 		info: EventInfo
 	)
@@ -137,34 +145,28 @@ public enum EventDispatchEvent: Event {
 
 // MARK: - EventDispatcher
 
-/// Protocol for event dispatchers (public API for sinking events).
-/// EventDispatch conforms to this protocol.
+/// Protocol for event dispatchers (public API for sinking events). `EventDispatch.default` conforms. Callers supply a checkpoint (entity + call site) so every sunk event is correlated to an origin.
 public protocol EventDispatcher: Sendable {
-	/// Sinks an event with optional metadata extras.
+	/// Sinks an event asynchronously. Call-site and entity context come from `checkpoint`; optional scalar metadata in `extra` is merged into the resulting `EventInfo.extra` (with `taskId` when the call is from a task).
 	/// - Parameters:
-	///   - event: The event to sink
-	///   - extra: Optional scalar metadata dictionary
-	///   - file: Call site file identifier (defaults to #fileID)
-	///   - line: Call site line number (defaults to #line)
-	///   - function: Call site function name (defaults to #function)
+	///   - event: The event to sink.
+	///   - checkpoint: Checkpoint (entity + file/line/function) for this sink call; use e.g. `Checkpoint.at(self, ...)` or a successor from another checkpoint.
+	///   - extra: Optional scalar key-value metadata attached to the event’s `EventInfo`.
 	func sink<E: Event>(
-		event: E,
-		extra: [String: ScalarValue]?,
-		file: StaticString,
-		line: UInt,
-		function: StaticString
+		_ event: E,
+		_ checkpoint: Checkpoint,
+		extra: [String: ScalarValue]?
 	)
 }
 
 // MARK: - EventSink
 
-/// Protocol for registered event sinks.
-/// Sinks registered with EventDispatch must conform to this protocol.
+/// Protocol for sinks that receive events. Implement this for type-specific sinks registered with `EventDispatch.register(_:sink:checkpoint:)` or for the global sink set with `EventDispatch.setGlobalSink(_:checkpoint:)`. Sinks are invoked on the default TaskQueue; implement thread-safe ingestion if needed.
 public protocol EventSink: Sendable {
-	/// Sinks an event with optional metadata extras.
+	/// Receives a sunk event and its metadata. Called on the default TaskQueue.
 	/// - Parameters:
-	///   - event: The event to sink
-	///   - info: The information about the event
+	///   - event: The typed event instance.
+	///   - info: Event metadata (eventId, timestamp, checkpoint, taskInfo, extra).
 	func sink<E: Event>(
 		event: E,
 		info: EventInfo
@@ -173,10 +175,10 @@ public protocol EventSink: Sendable {
 
 // MARK: - EventDispatch
 
-/// Single, app-wide, typed event router.
-/// Provides exactly one dispatcher for the entire application.
+/// Single, app-wide, typed event router. Provides one dispatcher instance (`EventDispatch.default`) for the entire app. Routes events by type to at most one registered sink per type; supports a global sink for all events (tracing, logging). Conforms to `Entity` so checkpoint chains can identify EventDispatch as the origin. All work runs on `TaskQueue.default`; callers pass a checkpoint for correlation.
 public final class EventDispatch: @unchecked Sendable,
-								  EventDispatcher {
+								  EventDispatcher,
+								  Entity {
 	// MARK: + Private scope
 
 	private var globalSink: (any EventSink)?
@@ -212,64 +214,48 @@ public final class EventDispatch: @unchecked Sendable,
 
 	// MARK: + Public scope
 
-	/// The default, app-wide EventDispatch instance.
-	/// All sink operations use this instance.
+	/// The default, app-wide EventDispatch instance. Use this for all sink, register, and unregister calls.
 	public static let `default` = EventDispatch()
 
-	/// Sets the global sink that receives all events before registered sinks.
-	/// The global sink is typically used for tracing, spanning, logging, etc.
-	/// Can only be set once. Subsequent calls are ignored.
+	/// Sets the global sink that receives every event (dispatched, dropped, and internal lifecycle) before type-specific sinks. Typically used for tracing, logging, or telemetry. Can only be set once; subsequent calls are ignored.
 	/// - Parameters:
-	///   - sink: The global sink instance
-	///   - file: Call site file identifier (defaults to #fileID)
-	///   - line: Call site line number (defaults to #line)
-	///   - function: Call site function name (defaults to #function)
-	public static func setGlobalSink(
+	///   - sink: The sink that will receive all events.
+	///   - checkpoint: Checkpoint (entity + call site) for this call; used to enqueue the globalSinkSet notification.
+	public func setGlobalSink(
 		_ sink: any EventSink,
-		file: StaticString = #fileID,
-		line: UInt = #line,
-		function: StaticString = #function
+		_ checkpoint: Checkpoint
 	) {
-		_ = TaskQueue.default.sync { _ in
-			guard `default`.globalSink == nil else {
-				return
-			}
-			`default`.globalSink = sink
-			// Emit event after setting to avoid recursion
-			TaskQueue.default.async { taskInfo in
-				let info = EventInfo(
-					file: String(describing: file),
-					line: line,
-					function: String(describing: function),
-					extra: [
-						TaskQueue.TaskInfo.Key.taskId: .uint64(taskInfo.taskId)
-					]
-				)
-				`default`.emitDispatchEvent(.globalSinkSet(info: info))
-			}
+		guard globalSink == nil else {
+			return
+		}
+		globalSink = sink
+
+		TaskQueue.default.async(checkpoint.next(self)) { [weak self] taskInfo in
+			guard let self else { return }
+
+			let info = EventInfo(
+				checkpoint: taskInfo.checkpoint.next(self),
+				taskInfo: taskInfo
+			)
+			emitDispatchEvent(.globalSinkSet(info: info))
 		}
 	}
 
-	/// Registers a sink for a specific event type.
-	/// At most one sink per event type is allowed.
+	/// Registers a sink for an event type. At most one sink per event type; registration is synchronized on the default TaskQueue.
 	/// - Parameters:
-	///   - eventType: The event type this sink handles
-	///   - sink: The sink instance that handles events of the specified type
-	///   - file: Call site file identifier (defaults to #fileID)
-	///   - line: Call site line number (defaults to #line)
-	///   - function: Call site function name (defaults to #function)
-	/// - Returns: `true` if registration succeeded, `false` if a sink already exists for this event type
+	///   - eventType: The event type (e.g. `MyEvent.self`) this sink handles.
+	///   - sink: The sink that will receive events of this type.
+	///   - checkpoint: Checkpoint (entity + call site) for this call.
+	/// - Returns: `true` if the sink was registered, `false` if a sink was already registered for this type.
 	@discardableResult
 	public func register<E: Event>(
 		_ eventType: E.Type,
 		sink: any EventSink,
-		file: StaticString = #fileID,
-		line: UInt = #line,
-		function: StaticString = #function
+		checkpoint: Checkpoint
 	) -> Bool {
 		let timestamp = MonotonicNanostamp.now
 
-		let result = TaskQueue.default.sync { _ in
+		let result = TaskQueue.default.sync(checkpoint.next(self)) { syncTaskInfo in
 			let typeID = ObjectIdentifier(E.self)
 
 			guard sinks[typeID] == nil else {
@@ -280,15 +266,12 @@ public final class EventDispatch: @unchecked Sendable,
 
 			// Emit event after registration
 			let eventTypeName = String(describing: eventType)
-			TaskQueue.default.async { taskInfo in
+			TaskQueue.default
+				.async(syncTaskInfo.checkpoint.next(self)) { taskInfo in
 				let info = EventInfo(
 					timestamp: timestamp,
-					file: String(describing: file),
-					line: line,
-					function: String(describing: function),
-					extra: [
-						TaskQueue.TaskInfo.Key.taskId: .uint64(taskInfo.taskId)
-					]
+					checkpoint: taskInfo.checkpoint.next(self),
+					taskInfo: taskInfo
 				)
 				self.emitDispatchEvent(.sinkRegistered(
 					eventType: eventTypeName,
@@ -302,23 +285,19 @@ public final class EventDispatch: @unchecked Sendable,
 		return result.value
 	}
 
-	/// Unregisters the sink for a specific event type.
+	/// Unregisters the sink for an event type. Synchronized on the default TaskQueue.
 	/// - Parameters:
-	///   - eventType: The event type to unregister
-	///   - file: Call site file identifier (defaults to #fileID)
-	///   - line: Call site line number (defaults to #line)
-	///   - function: Call site function name (defaults to #function)
-	/// - Returns: `true` if a sink was removed, `false` if no sink was registered for this event type
+	///   - eventType: The event type (e.g. `MyEvent.self`) to unregister.
+	///   - checkpoint: Checkpoint (entity + call site) for this call.
+	/// - Returns: `true` if a sink was removed, `false` if none was registered for this type.
 	@discardableResult
 	public func unregisterSink<E: Event>(
 		_ eventType: E.Type,
-		file: StaticString = #fileID,
-		line: UInt = #line,
-		function: StaticString = #function
+		checkpoint: Checkpoint
 	) -> Bool {
 		let timestamp = MonotonicNanostamp.now
 
-		let result = TaskQueue.default.sync { _ in
+		let result = TaskQueue.default.sync(checkpoint.next(self)) { syncTaskInfo in
 			let typeID = ObjectIdentifier(E.self)
 			guard sinks.removeValue(forKey: typeID) != nil else {
 				return false
@@ -326,15 +305,12 @@ public final class EventDispatch: @unchecked Sendable,
 
 			// Emit event after unregistration
 			let eventTypeName = String(describing: eventType)
-			TaskQueue.default.async { taskInfo in
+			TaskQueue.default
+				.async(syncTaskInfo.checkpoint.next(self)) { taskInfo in
 				let info = EventInfo(
 					timestamp: timestamp,
-					file: String(describing: file),
-					line: line,
-					function: String(describing: function),
-					extra: [
-						TaskQueue.TaskInfo.Key.taskId: .uint64(taskInfo.taskId)
-					]
+					checkpoint: taskInfo.checkpoint.next(self),
+					taskInfo: taskInfo
 				)
 				self.emitDispatchEvent(.sinkUnregistered(
 					eventType: eventTypeName,
@@ -348,28 +324,24 @@ public final class EventDispatch: @unchecked Sendable,
 		return result.value
 	}
 
-	/// Sinks an event asynchronously.
-	/// If no sink is registered for the event type, the event is dropped silently.
+	/// Sinks an event asynchronously on the default TaskQueue. If a sink is registered for the event’s type, it receives the event; otherwise the event is dropped and a dropped event is emitted to the global sink. Timestamp is captured before enqueue.
+	/// - Parameters:
+	///   - event: The event to sink.
+	///   - checkpoint: Checkpoint (entity + call site) for this call.
+	///   - extra: Optional scalar metadata merged into the event’s `EventInfo.extra` (with `taskId` when run from a task).
 	public func sink<E: Event>(
-		event: E,
-		extra: [String: ScalarValue]? = nil,
-		file: StaticString = #fileID,
-		line: UInt = #line,
-		function: StaticString = #function
+		_ event: E,
+		_ checkpoint: Checkpoint,
+		extra: [String: ScalarValue]? = nil
 	) {
 		let timestamp = MonotonicNanostamp.now
-		TaskQueue.default.async { taskInfo in
+		TaskQueue.default.async(checkpoint.next(self)) { taskInfo in
 			let typeID = ObjectIdentifier(E.self)
-
-			var correlatedExtra = extra ?? [:]
-			correlatedExtra[TaskQueue.TaskInfo.Key.taskId] = .uint64(taskInfo.taskId)
 
 			let info = EventInfo(
 				timestamp: timestamp,
-				file: String(describing: file),
-				line: line,
-				function: String(describing: function),
-				extra: correlatedExtra
+				checkpoint: taskInfo.checkpoint.next(self),
+				taskInfo: taskInfo
 			)
 
 			if let sink = self.sinks[typeID] {
