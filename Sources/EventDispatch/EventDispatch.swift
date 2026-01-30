@@ -70,35 +70,21 @@ public struct EventInfo: Sendable,
 public struct AnyEvent: Event {
 	/// The type-erased event instance. After decoding, this is a placeholder if the event was encoded.
 	public let event: any Event
-	/// The name of the event type (e.g. `String(describing: E.self)`).
-	public let eventTypeName: String
+
+	@inlinable
+	public var kind: String {
+		event.kind
+	}
 
 	public init<E: Event>(_ event: E) {
 		self.event = event
-		self.eventTypeName = String(describing: E.self)
 	}
 }
 
-extension AnyEvent: Codable {
-	enum CodingKeys: String, CodingKey {
+extension AnyEvent: Encodable {
+	enum CodingKeys: String,
+					 CodingKey {
 		case event
-		case eventTypeName
-	}
-
-	public init(from decoder: Decoder) throws {
-		let container = try decoder.container(keyedBy: CodingKeys.self)
-		eventTypeName = try container.decode(
-			String.self,
-			forKey: .eventTypeName
-		)
-
-		// We can't decode the actual event without knowing its type
-		// Create a placeholder - the event won't be accessible after decoding
-		// This is acceptable since EventDispatchEvent is primarily for runtime tracing
-		struct PlaceholderEvent: Event {
-			//
-		}
-		event = PlaceholderEvent()
 	}
 
 	public func encode(to encoder: Encoder) throws {
@@ -106,10 +92,6 @@ extension AnyEvent: Codable {
 		try container.encode(
 			event,
 			forKey: .event
-		)
-		try container.encode(
-			eventTypeName,
-			forKey: .eventTypeName
 		)
 	}
 }
