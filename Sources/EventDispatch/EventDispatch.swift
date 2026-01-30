@@ -73,7 +73,7 @@ public struct AnyEvent: Event {
 	/// The name of the event type (e.g. `String(describing: E.self)`).
 	public let eventTypeName: String
 
-	init<E: Event>(_ event: E) {
+	public init<E: Event>(_ event: E) {
 		self.event = event
 		self.eventTypeName = String(describing: E.self)
 	}
