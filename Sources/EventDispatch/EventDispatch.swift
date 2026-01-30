@@ -18,8 +18,14 @@ public protocol Event: Encodable,
 }
 
 extension Event {
-	public var kind: String {
+	@inlinable
+	public var typeName: String {
 		String(describing: type(of: self))
+	}
+
+	@inlinable
+	public var kind: String {
+		typeName
 	}
 }
 
