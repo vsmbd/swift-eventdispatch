@@ -264,7 +264,7 @@ public final class EventDispatch: @unchecked Sendable,
 	public func register<E: Event>(
 		_ eventType: E.Type,
 		sink: any EventSink,
-		checkpoint: Checkpoint
+		_ checkpoint: Checkpoint
 	) -> Bool {
 		let timestamp = MonotonicNanostamp.now
 
@@ -306,7 +306,7 @@ public final class EventDispatch: @unchecked Sendable,
 	@discardableResult
 	public func unregisterSink<E: Event>(
 		_ eventType: E.Type,
-		checkpoint: Checkpoint
+		_ checkpoint: Checkpoint
 	) -> Bool {
 		let timestamp = MonotonicNanostamp.now
 
