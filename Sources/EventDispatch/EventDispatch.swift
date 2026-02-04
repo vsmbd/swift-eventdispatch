@@ -222,13 +222,15 @@ public final class EventDispatch: @unchecked Sendable,
 	}
 
 	private init() {
-		//
+		identifier = Self.nextID
 	}
 
 	// MARK: + Public scope
 
 	/// The default, app-wide EventDispatch instance. Use this for all sink, register, and unregister calls.
 	public static let `default` = EventDispatch()
+
+	public let identifier: UInt64
 
 	/// Sets the global sink that receives every event (dispatched, dropped, and internal lifecycle) before type-specific sinks. Typically used for tracing, logging, or telemetry. Can only be set once; subsequent calls are ignored.
 	/// - Parameters:
